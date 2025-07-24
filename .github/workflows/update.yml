@@ -1,0 +1,40 @@
+name: Mise à jour automatique du Dashboard
+
+on:
+  schedule:
+	# Toutes les heures
+	- cron: '0 * * * *'
+  
+  # Permet le déclenchement manuel
+  workflow_dispatch:
+
+jobs:
+  update-dashboard:
+	runs-on: ubuntu-latest
+	
+	steps:
+	- name: Checkout repository
+	  uses: actions/checkout@v3
+	
+	- name: Setup Node.js
+	  uses: actions/setup-node@v3
+	  with:
+		node-version: '18'
+	
+	- name: Install dependencies
+	  run: |
+		npm init -y
+		npm install @notionhq/client
+	
+	- name: Update dashboard data
+	  env:
+		NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+		NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+	  run: node update-data.js
+	
+	- name: Commit and push changes
+	  run: |
+		git config --local user.email "action@github.com"
+		git config --local user.name "GitHub Action"
+		git add index.html
+		git diff --quiet && git diff --staged --quiet || (git commit -m "Mise à jour automatique du dashboard - $(date +'%Y-%m-%d %H:%M:%S')" && git push)
