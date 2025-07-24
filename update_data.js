@@ -1,5 +1,5 @@
-// update-data.js - Version locale
-require('dotenv').config(); // Charge les variables d'environnement depuis .env
+// update-data.js - Version corrigée
+require('dotenv').config();
 
 const { Client } = require('@notionhq/client');
 const fs = require('fs');
@@ -21,8 +21,7 @@ console.log('🔧 Configuration :');
 console.log('- Database ID:', databaseId);
 console.log('- API Key:', process.env.NOTION_API_KEY.substring(0, 10) + '...');
 
-// Fonction pour récupérer les données Notion
-
+// Fonction pour récupérer les données Notion avec pagination
 async function fetchNotionData() {
 	console.log('\n📥 Récupération des données depuis Notion...');
 	
@@ -39,7 +38,7 @@ async function fetchNotionData() {
 			const response = await notion.databases.query({
 				database_id: databaseId,
 				start_cursor: startCursor,
-				page_size: 100 // Maximum par page
+				page_size: 100
 			});
 			
 			allResults = allResults.concat(response.results);
@@ -54,63 +53,124 @@ async function fetchNotionData() {
 		
 	} catch (error) {
 		console.error('❌ Erreur lors de la récupération des données:', error.message);
-		
-		// Aide au débogage
-		if (error.code === 'object_not_found') {
-			console.error('\n💡 Solutions possibles :');
-			console.error('1. Vérifiez que l\'ID de la base de données est correct');
-			console.error('2. Assurez-vous que l\'intégration a accès à la base');
-			console.error('3. Dans Notion : Share > Add connections > Ajoutez votre intégration');
-		} else if (error.code === 'unauthorized') {
-			console.error('\n💡 Vérifiez que votre NOTION_API_KEY est correcte');
-		}
-		
 		throw error;
 	}
 }
 
-// Calculer les KPIs
+// Calculer les KPIs - VERSION CORRIGÉE
 function calculateKPIs(data) {
 	console.log('\n📊 Calcul des KPIs...');
 	
 	const total = data.length;
 	
-	// Taux de réussite
-	const success = data.filter(item => 
-		item.properties['Statut']?.select?.name === 'Contrat signé'
-	).length;
-	const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+	if (total === 0) {
+		console.log('⚠️ Aucune donnée à traiter');
+		return {
+			total: 0,
+			successRate: 0,
+			failureRate: 0,
+			noResponseRate: 0,
+			avgCalls: 0,
+			avgPrice: 0,
+			venueStats: { 'Rooftop': { total: 0, success: 0 }, 'Tama': { total: 0, success: 0 } },
+			topChannels: [],
+			monthlyData: {},
+			refusalReasons: {},
+			tooExpensiveRate: 0,
+			lastUpdate: new Date().toLocaleString('fr-FR')
+		};
+	}
+
+	// DEBUG - Voir la structure exacte
+	console.log('\n🔍 Analyse de la structure :');
+	if (data[0]) {
+		const statut = data[0].properties['Statut'];
+		console.log('Type de Statut :', statut?.type);
+		if (statut?.select) {
+			console.log('Exemple valeur Statut :', statut.select.name);
+		} else if (statut?.status) {
+			console.log('Exemple valeur Statut (status) :', statut.status.name);
+		}
+	}
+	
+	// Taux de réussite - Gérer les deux types possibles
+	const success = data.filter(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		return status === 'Contrat signé';
+	}).length;
+	const successRate = Math.round((success / total) * 100);
 	
 	// Taux d'échec
-	const failures = data.filter(item => 
-		item.properties['Statut']?.select?.name === 'Réponse négative'
-	).length;
-	const failureRate = total > 0 ? Math.round((failures / total) * 100) : 0;
+	const failures = data.filter(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		return status === 'Réponse négative';
+	}).length;
+	const failureRate = Math.round((failures / total) * 100);
 	
 	// Taux sans réponse
-	const noResponse = data.filter(item => 
-		item.properties['Statut']?.select?.name === 'Pas de réponse'
-	).length;
-	const noResponseRate = total > 0 ? Math.round((noResponse / total) * 100) : 0;
+	const noResponse = data.filter(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		return status === 'Pas de réponse';
+	}).length;
+	const noResponseRate = Math.round((noResponse / total) * 100);
 	
-	// Nombre d'appels moyen
-	const totalCalls = data.reduce((sum, item) => {
-		const calls = item.properties['Nombre d\'appel']?.number || 0;
-		return sum + calls;
-	}, 0);
-	const avgCalls = total > 0 ? (totalCalls / total).toFixed(1) : 0;
+	// Nombre d'appels moyen - EXCLURE LES ZÉROS ET VALEURS NULLES
+	let totalCalls = 0;
+	let countWithCalls = 0;
+	
+	data.forEach(item => {
+		const calls = item.properties['Nombre d\'appel']?.number;
+		// Ne compter que les valeurs > 0
+		if (calls && calls > 0) {
+			totalCalls += calls;
+			countWithCalls++;
+		}
+	});
+	
+	const avgCalls = countWithCalls > 0 ? (totalCalls / countWithCalls).toFixed(1) : 0;
+	console.log(`Nombre d'appels : ${countWithCalls} prospects avec appels, moyenne : ${avgCalls}`);
 	
 	// Tarif moyen (uniquement sur les contrats signés)
-	const successfulDeals = data.filter(item => 
-		item.properties['Statut']?.select?.name === 'Contrat signé'
-	);
-	const totalRevenue = successfulDeals.reduce((sum, item) => {
-		const revenue = item.properties['Tarif HT']?.number || 0;
-		return sum + revenue;
-	}, 0);
-	const avgPrice = successfulDeals.length > 0 
-		? Math.round(totalRevenue / successfulDeals.length) 
-		: 0;
+	const successfulDeals = data.filter(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		return status === 'Contrat signé';
+	});
+	
+	let totalRevenue = 0;
+	let dealsWithPrice = 0;
+	
+	successfulDeals.forEach(item => {
+		// Essayer tous les champs possibles pour le tarif
+		let price = item.properties['Tarif HT']?.number || 0;
+		
+		// Si Tarif HT est vide, essayer CA HT
+		if (!price || price === 0) {
+			price = item.properties['CA HT']?.number || 0;
+		}
+		
+		// Si toujours vide, essayer Tarif final (peut être du texte)
+		if (!price || price === 0) {
+			const tarifFinal = item.properties['Tarif final']?.rich_text?.[0]?.plain_text || 
+							  item.properties['Tarif final']?.title?.[0]?.plain_text || '';
+			// Extraire le nombre du texte
+			const match = tarifFinal.match(/(\d+)/);
+			if (match) {
+				price = parseInt(match[1]);
+			}
+		}
+		
+		if (price > 0) {
+			totalRevenue += price;
+			dealsWithPrice++;
+		}
+	});
+	
+	const avgPrice = dealsWithPrice > 0 ? Math.round(totalRevenue / dealsWithPrice) : 0;
+	console.log(`Tarif moyen : ${dealsWithPrice} contrats avec prix, moyenne : ${avgPrice}€`);
 	
 	// Répartition par lieu
 	const venueStats = {
@@ -120,7 +180,9 @@ function calculateKPIs(data) {
 	
 	data.forEach(item => {
 		const venues = item.properties['Lieu']?.multi_select || [];
-		const isSuccess = item.properties['Statut']?.select?.name === 'Contrat signé';
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		const isSuccess = status === 'Contrat signé';
 		
 		venues.forEach(venue => {
 			if (venueStats[venue.name]) {
@@ -130,28 +192,47 @@ function calculateKPIs(data) {
 		});
 	});
 	
-	// Répartition par canal d'acquisition
+	// Canal d'acquisition - CORRECTION IMPORTANTE
 	const channelStats = {};
+	const channelTotal = {};
+	
 	data.forEach(item => {
-		const channel = item.properties['Canal d\'acquisition']?.select?.name || 'Non spécifié';
-		if (!channelStats[channel]) {
-			channelStats[channel] = 0;
+		// Essayer différentes orthographes possibles
+		let channel = item.properties['Canal d\'acquisition']?.select?.name ||
+					 item.properties['Canal d\'acquisition']?.select?.name ||
+					 item.properties['Canal d\'acquisition']?.multi_select?.[0]?.name;
+		
+		if (!channel || channel === '') {
+			channel = 'Non spécifié';
 		}
-		if (item.properties['Statut']?.select?.name === 'Contrat signé') {
-			channelStats[channel]++;
+		
+		// Compter le total par canal
+		channelTotal[channel] = (channelTotal[channel] || 0) + 1;
+		
+		// Compter seulement les succès
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		
+		if (status === 'Contrat signé') {
+			channelStats[channel] = (channelStats[channel] || 0) + 1;
 		}
 	});
 	
-	// Top 5 canaux
+	// Top 5 canaux par nombre de CONVERSIONS (pas total)
 	const topChannels = Object.entries(channelStats)
+		.filter(([channel, count]) => count > 0) // Exclure les canaux sans conversion
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, 5);
 	
-	// Évolution mensuelle (derniers 6 mois)
+	console.log('Canaux trouvés :', Object.keys(channelTotal));
+	console.log('Top canaux avec conversions :', topChannels);
+	
+	// Évolution mensuelle
 	const monthlyData = {};
 	const now = new Date();
 	const months = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'août', 'sep', 'oct', 'nov', 'déc'];
 	
+	// Initialiser les 6 derniers mois
 	for (let i = 5; i >= 0; i--) {
 		const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
 		const monthKey = months[date.getMonth()];
@@ -171,17 +252,28 @@ function calculateKPIs(data) {
 	
 	// Raisons de refus
 	const refusalReasons = {};
-	data.filter(item => 
-		item.properties['Statut']?.select?.name === 'Réponse négative'
-	).forEach(item => {
+	
+	data.filter(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		return status === 'Réponse négative';
+	}).forEach(item => {
 		const reason = item.properties['Raison de refus']?.select?.name || 'Non spécifié';
 		refusalReasons[reason] = (refusalReasons[reason] || 0) + 1;
 	});
 	
-	console.log('✅ KPIs calculés :');
-	console.log(`- Taux de réussite : ${successRate}%`);
+	// Taux "Prix trop cher"
+	const tooExpensiveCount = refusalReasons['Trop Cher'] || 0;
+	const totalRefusals = Object.values(refusalReasons).reduce((a, b) => a + b, 0);
+	const tooExpensiveRate = totalRefusals > 0 ? Math.round((tooExpensiveCount / totalRefusals) * 100) : 0;
+	
+	console.log('\n✅ KPIs calculés :');
+	console.log(`- Taux de réussite : ${successRate}% (${success}/${total})`);
+	console.log(`- Taux d'échec : ${failureRate}%`);
+	console.log(`- Taux sans réponse : ${noResponseRate}%`);
 	console.log(`- Nombre d'appels moyen : ${avgCalls}`);
 	console.log(`- Tarif moyen : ${avgPrice}€`);
+	console.log(`- Canaux avec conversions : ${topChannels.length}`);
 	
 	return {
 		total,
@@ -194,6 +286,7 @@ function calculateKPIs(data) {
 		topChannels,
 		monthlyData,
 		refusalReasons,
+		tooExpensiveRate,
 		lastUpdate: new Date().toLocaleString('fr-FR')
 	};
 }
@@ -246,7 +339,7 @@ function generateHTML(kpis) {
 		
 		.kpi-grid {
 			display: grid;
-			grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+			grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 			gap: 20px;
 			margin-bottom: 40px;
 		}
@@ -277,9 +370,16 @@ function generateHTML(kpis) {
 			letter-spacing: 0.5px;
 		}
 		
+		.kpi-sublabel {
+			color: #999;
+			font-size: 12px;
+			margin-top: 5px;
+		}
+		
 		.positive { color: #10b981; }
 		.negative { color: #ef4444; }
 		.neutral { color: #3b82f6; }
+		.warning { color: #f59e0b; }
 		
 		.chart-grid {
 			display: grid;
@@ -348,6 +448,13 @@ function generateHTML(kpis) {
 			text-transform: uppercase;
 			letter-spacing: 0.5px;
 		}
+		
+		.no-data {
+			text-align: center;
+			color: #999;
+			padding: 40px;
+			font-style: italic;
+		}
 	</style>
 </head>
 <body>
@@ -361,7 +468,7 @@ function generateHTML(kpis) {
 		<div class="kpi-grid">
 			<div class="kpi-card">
 				<div class="kpi-label">Taux de Réussite</div>
-				<div class="kpi-value positive">${kpis.successRate}%</div>
+				<div class="kpi-value ${kpis.successRate > 50 ? 'positive' : kpis.successRate > 30 ? 'warning' : 'negative'}">${kpis.successRate}%</div>
 				<div class="progress-bar">
 					<div class="progress-fill" style="width: ${kpis.successRate}%"></div>
 				</div>
@@ -370,19 +477,31 @@ function generateHTML(kpis) {
 			<div class="kpi-card">
 				<div class="kpi-label">Nombre d'Appels Moyen</div>
 				<div class="kpi-value neutral">${kpis.avgCalls}</div>
-				<div class="kpi-label" style="margin-top: 10px">Par prospect</div>
+				<div class="kpi-sublabel">Par prospect contacté</div>
 			</div>
 			
 			<div class="kpi-card">
 				<div class="kpi-label">Tarif Moyen</div>
 				<div class="kpi-value neutral">${kpis.avgPrice.toLocaleString('fr-FR')}€</div>
-				<div class="kpi-label" style="margin-top: 10px">HT par contrat</div>
+				<div class="kpi-sublabel">HT par contrat signé</div>
 			</div>
 			
 			<div class="kpi-card">
 				<div class="kpi-label">Total Prospects</div>
 				<div class="kpi-value">${kpis.total}</div>
-				<div class="kpi-label" style="margin-top: 10px">Dans la base</div>
+				<div class="kpi-sublabel">Dans la base</div>
+			</div>
+			
+			<div class="kpi-card">
+				<div class="kpi-label">Taux "Prix trop cher"</div>
+				<div class="kpi-value ${kpis.tooExpensiveRate > 50 ? 'negative' : kpis.tooExpensiveRate > 30 ? 'warning' : 'positive'}">${kpis.tooExpensiveRate}%</div>
+				<div class="kpi-sublabel">Des refus</div>
+			</div>
+			
+			<div class="kpi-card">
+				<div class="kpi-label">Sans Réponse</div>
+				<div class="kpi-value warning">${kpis.noResponseRate}%</div>
+				<div class="kpi-sublabel">Des prospects</div>
 			</div>
 		</div>
 		
@@ -405,7 +524,7 @@ function generateHTML(kpis) {
 			
 			<div class="chart-container">
 				<h3 class="chart-title">🎯 Top Canaux d'Acquisition</h3>
-				<canvas id="channelChart"></canvas>
+				${kpis.topChannels.length > 0 ? '<canvas id="channelChart"></canvas>' : '<div class="no-data">Aucune conversion enregistrée par canal</div>'}
 			</div>
 		</div>
 		
@@ -456,7 +575,7 @@ function generateHTML(kpis) {
 						kpis.noResponseRate, 
 						100 - kpis.successRate - kpis.failureRate - kpis.noResponseRate
 					],
-					backgroundColor: ['#10b981', '#ef4444', '#6b7280', '#3b82f6'],
+					backgroundColor: ['#10b981', '#ef4444', '#f59e0b', '#3b82f6'],
 					borderWidth: 0
 				}]
 			},
@@ -467,6 +586,13 @@ function generateHTML(kpis) {
 					legend: {
 						position: 'bottom',
 						padding: 20
+					},
+					tooltip: {
+						callbacks: {
+							label: function(context) {
+								return context.label + ': ' + context.parsed + '%';
+							}
+						}
 					}
 				}
 			}
@@ -495,7 +621,10 @@ function generateHTML(kpis) {
 				maintainAspectRatio: false,
 				scales: {
 					y: {
-						beginAtZero: true
+						beginAtZero: true,
+						ticks: {
+							precision: 0
+						}
 					}
 				}
 			}
@@ -519,34 +648,42 @@ function generateHTML(kpis) {
 				maintainAspectRatio: false,
 				scales: {
 					y: {
-						beginAtZero: true
+						beginAtZero: true,
+						ticks: {
+							precision: 0
+						}
 					}
 				}
 			}
 		});
 		
-		// Graphique des canaux
-		new Chart(document.getElementById('channelChart'), {
-			type: 'horizontalBar',
-			data: {
-				labels: kpis.topChannels.map(c => c[0]),
-				datasets: [{
-					label: 'Conversions',
-					data: kpis.topChannels.map(c => c[1]),
-					backgroundColor: ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444']
-				}]
-			},
-			options: {
-				responsive: true,
-				maintainAspectRatio: false,
-				indexAxis: 'y',
-				scales: {
-					x: {
-						beginAtZero: true
+		// Graphique des canaux (seulement si des données existent)
+		if (kpis.topChannels.length > 0) {
+			new Chart(document.getElementById('channelChart'), {
+				type: 'horizontalBar',
+				data: {
+					labels: kpis.topChannels.map(c => c[0]),
+					datasets: [{
+						label: 'Conversions',
+						data: kpis.topChannels.map(c => c[1]),
+						backgroundColor: ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444']
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					indexAxis: 'y',
+					scales: {
+						x: {
+							beginAtZero: true,
+							ticks: {
+								precision: 0
+							}
+						}
 					}
 				}
-			}
-		});
+			});
+		}
 	</script>
 </body>
 </html>`;
@@ -573,7 +710,6 @@ async function updateDashboard() {
 		
 		console.log('\n✅ Dashboard mis à jour avec succès!');
 		console.log('📄 Fichier créé : index.html');
-		console.log('\n💡 Ouvrez index.html dans votre navigateur pour voir le résultat');
 		
 	} catch (error) {
 		console.error('\n❌ Erreur :', error.message);
