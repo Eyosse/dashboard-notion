@@ -238,18 +238,15 @@ function calculateKPIs(data) {
 	
 	// Préparer deux vues : par volume ET par taux de conversion
 	
-	// Top canaux par VOLUME de conversions (excluant "Non renseigné" si peu significatif)
-	const topChannelsByVolume = Object.entries(channelStats)
+	// Afficher TOUS les canaux par VOLUME TOTAL (excluant "Non renseigné")
+	const allChannelsByVolume = Object.entries(channelStats)
 		.filter(([channel, stats]) => {
-			// Exclure "Non renseigné" s'il représente plus de 80% des données
-			if (channel === 'Non renseigné' && missingChannelCount > data.length * 0.8) {
-				return false;
-			}
-			return stats.conversions > 0;
+			// Exclure seulement "Non renseigné"
+			return channel !== 'Non renseigné' && stats.total > 0;
 		})
-		.map(([channel, stats]) => [channel, stats.conversions])
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, 5);
+		.map(([channel, stats]) => [channel, stats]) // Garder toutes les stats
+		.sort((a, b) => b[1].total - a[1].total)
+		.slice(0, 10);
 	
 	// Top canaux par TAUX de conversion (minimum 5 prospects pour être significatif)
 	const topChannelsByRate = Object.entries(channelStats)
@@ -263,8 +260,8 @@ function calculateKPIs(data) {
 	});
 	console.log(`\n⚠️  Prospects sans canal renseigné : ${missingChannelCount} (${Math.round((missingChannelCount / data.length) * 100)}%)`);
 	
-	// Utiliser topChannelsByVolume par défaut, ou topChannelsByRate si plus pertinent
-	const topChannels = topChannelsByVolume.length >= 3 ? topChannelsByVolume : topChannelsByRate.map(([channel, stats]) => [channel, stats.conversions]);
+	// Utiliser allChannelsByVolume comme topChannels
+	const topChannels = allChannelsByVolume;
 	
 	console.log('Top canaux avec conversions :', topChannels);
 	
@@ -535,6 +532,12 @@ function generateHTML(kpis) {
 			font-size: 14px;
 			color: #666;
 		}
+		
+		/* Style pour les légendes barrées */
+		.chartjs-legend li.hidden {
+			text-decoration: line-through;
+			opacity: 0.5;
+		}
 	</style>
 </head>
 <body>
@@ -603,32 +606,15 @@ function generateHTML(kpis) {
 			</div>
 			
 			<div class="chart-container">
-				<h3 class="chart-title">🎯 Canaux d'Acquisition</h3>
+				<h3 class="chart-title">🎯 Répartition des Prospects par Canal d'Acquisition</h3>
 				${kpis.missingChannelRate > 70 ? 
 					`<div class="warning-box">
 						<p>⚠️ ${kpis.missingChannelRate}% des prospects n'ont pas de canal renseigné</p>
 					</div>` : ''
 				}
-				${kpis.topChannels.length > 2 ? 
+				${kpis.topChannels.length > 0 ? 
 					'<canvas id="channelChart"></canvas>' : 
-					kpis.topChannels.length > 0 ?
-						`<div class="simple-stats">
-							${Object.entries(kpis.channelStats)
-								.filter(([channel, stats]) => stats.conversions > 0)
-								.sort((a, b) => b[1].conversions - a[1].conversions)
-								.map(([channel, stats]) => `
-									<div class="stat-item">
-										<div class="stat-header">
-											<strong>${channel}</strong>
-											<span style="color: #10b981;">${stats.conversions} conversion${stats.conversions > 1 ? 's' : ''}</span>
-										</div>
-										<div class="stat-detail">
-											Taux: ${stats.rate}% (${stats.conversions}/${stats.total})
-										</div>
-									</div>
-								`).join('')}
-						</div>` :
-						'<div class="no-data">Aucune conversion enregistrée par canal. Vérifiez que le champ "Canal d\'acquisition" est bien renseigné dans vos prospects.</div>'
+					'<div class="no-data">Aucun canal d\'acquisition renseigné. Assurez-vous de bien remplir ce champ dans vos prospects.</div>'
 				}
 			</div>
 		</div>
@@ -762,47 +748,123 @@ function generateHTML(kpis) {
 			}
 		});
 		
-		// Graphique des canaux (version améliorée)
-		if (kpis.topChannels.length > 2) {
+		// Graphique des canaux en CAMEMBERT (pie chart) - Volume avec conversions dans la légende
+		if (kpis.topChannels.length > 0) {
 			const ctx = document.getElementById('channelChart');
-			const channelData = kpis.topChannels.map(c => c[1]);
-			const channelLabels = kpis.topChannels.map(c => {
-				const stats = kpis.channelStats[c[0]];
-				return stats ? c[0] + ' (' + stats.rate + '%)' : c[0];
-			});
+			// Utiliser le volume total (pas les conversions)
+			const channelData = kpis.topChannels.map(c => c[1].total);
+			const channelLabels = kpis.topChannels.map(c => c[0]);
+			
+			// Couleurs pour le camembert
+			const colors = [
+				'#10b981', // Vert
+				'#3b82f6', // Bleu
+				'#8b5cf6', // Violet
+				'#f59e0b', // Orange
+				'#ef4444', // Rouge
+				'#6366f1', // Indigo
+				'#14b8a6', // Teal
+				'#f97316', // Orange foncé
+				'#a78bfa', // Violet clair
+				'#60a5fa'  // Bleu clair
+			];
 			
 			new Chart(ctx, {
-				type: 'horizontalBar',
+				type: 'pie',
 				data: {
 					labels: channelLabels,
 					datasets: [{
-						label: 'Conversions',
 						data: channelData,
-						backgroundColor: ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444']
+						backgroundColor: colors.slice(0, channelData.length),
+						borderWidth: 2,
+						borderColor: '#fff'
 					}]
 				},
 				options: {
 					responsive: true,
 					maintainAspectRatio: false,
-					indexAxis: 'y',
-					scales: {
-						x: {
-							beginAtZero: true,
-							ticks: {
-								precision: 0
-							}
-						}
-					},
 					plugins: {
+						legend: {
+							position: 'right',
+							labels: {
+								padding: 15,
+								font: {
+									size: 12
+								},
+								generateLabels: function(chart) {
+									const data = chart.data;
+									if (data.labels.length && data.datasets.length) {
+										const dataset = data.datasets[0];
+										const meta = chart.getDatasetMeta(0);
+										const total = dataset.data.reduce((a, b) => a + b, 0);
+										
+										return data.labels.map((label, i) => {
+											const value = dataset.data[i];
+											const percentage = ((value / total) * 100).toFixed(1);
+											const stats = kpis.channelStats[label];
+											const conversions = stats ? stats.conversions : 0;
+											
+											// Vérifier si l'élément est caché
+											const hidden = meta.data && meta.data[i] && meta.data[i].hidden;
+											
+											// Afficher : Canal (X%) - Y conversions
+											return {
+												text: label + ' (' + percentage + '%) - ' + conversions + ' conv.',
+												fillStyle: dataset.backgroundColor[i],
+												strokeStyle: dataset.borderColor || '#fff',
+												lineWidth: dataset.borderWidth || 0,
+												hidden: hidden,
+												index: i,
+												// Style pour les éléments cachés
+												textDecoration: hidden ? 'line-through' : '',
+												fontColor: hidden ? 'rgba(0,0,0,0.4)' : ''
+											};
+										});
+									}
+									return [];
+								}
+							},
+							onClick: function(e, legendItem, legend) {
+								const index = legendItem.index;
+								const chart = legend.chart;
+								const meta = chart.getDatasetMeta(0);
+								
+								// Toggle la visibilité
+								meta.data[index].hidden = !meta.data[index].hidden;
+								
+								// Mettre à jour le style de la légende
+								legendItem.hidden = meta.data[index].hidden;
+								
+								// Ajouter/retirer la classe pour le style barré
+								if (meta.data[index].hidden) {
+									legendItem.textDecoration = 'line-through';
+									legendItem.fontColor = 'rgba(0,0,0,0.4)';
+								} else {
+									legendItem.textDecoration = '';
+									legendItem.fontColor = '';
+								}
+								
+								// Redessiner le graphique
+								chart.update();
+							}
+						},
 						tooltip: {
 							callbacks: {
-								afterLabel: function(context) {
-									const channel = kpis.topChannels[context.dataIndex][0];
+								label: function(context) {
+									const channel = context.label;
+									const value = context.parsed;
 									const stats = kpis.channelStats[channel];
+									const total = context.dataset.data.reduce((a, b) => a + b, 0);
+									const percentage = ((value / total) * 100).toFixed(1);
+									
 									if (stats) {
-										return 'Taux de conversion: ' + stats.rate + '%\\nTotal prospects: ' + stats.total;
+										return [
+											channel + ': ' + value + ' prospects (' + percentage + '%)',
+											'Conversions: ' + stats.conversions,
+											'Taux de conversion: ' + stats.rate + '%'
+										];
 									}
-									return '';
+									return channel + ': ' + value + ' prospects (' + percentage + '%)';
 								}
 							}
 						}
