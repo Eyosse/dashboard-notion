@@ -77,6 +77,9 @@ function calculateKPIs(data) {
 			monthlyData: {},
 			refusalReasons: {},
 			tooExpensiveRate: 0,
+			channelStats: {},
+			topChannelsByRate: [],
+			missingChannelRate: 0,
 			lastUpdate: new Date().toLocaleString('fr-FR')
 		};
 	}
@@ -192,9 +195,10 @@ function calculateKPIs(data) {
 		});
 	});
 	
-	// Canal d'acquisition - CORRECTION IMPORTANTE
+	// Canal d'acquisition - VERSION AMÉLIORÉE
 	const channelStats = {};
 	const channelTotal = {};
+	let missingChannelCount = 0;
 	
 	data.forEach(item => {
 		// Essayer différentes orthographes possibles
@@ -202,29 +206,66 @@ function calculateKPIs(data) {
 					 item.properties['Canal d\'acquisition']?.select?.name ||
 					 item.properties['Canal d\'acquisition']?.multi_select?.[0]?.name;
 		
+		// Si le canal est vide, compter séparément
 		if (!channel || channel === '') {
-			channel = 'Non spécifié';
+			missingChannelCount++;
+			channel = 'Non renseigné'; // Renommer pour plus de clarté
 		}
 		
 		// Compter le total par canal
 		channelTotal[channel] = (channelTotal[channel] || 0) + 1;
 		
-		// Compter seulement les succès
+		// Initialiser le compteur de succès
+		if (!channelStats[channel]) {
+			channelStats[channel] = { conversions: 0, total: 0, rate: 0 };
+		}
+		channelStats[channel].total++;
+		
+		// Compter les succès
 		const statusProp = item.properties['Statut'];
 		const status = statusProp?.select?.name || statusProp?.status?.name;
 		
 		if (status === 'Contrat signé') {
-			channelStats[channel] = (channelStats[channel] || 0) + 1;
+			channelStats[channel].conversions++;
 		}
 	});
 	
-	// Top 5 canaux par nombre de CONVERSIONS (pas total)
-	const topChannels = Object.entries(channelStats)
-		.filter(([channel, count]) => count > 0) // Exclure les canaux sans conversion
+	// Calculer le taux de conversion par canal
+	Object.keys(channelStats).forEach(channel => {
+		const stats = channelStats[channel];
+		stats.rate = stats.total > 0 ? Math.round((stats.conversions / stats.total) * 100) : 0;
+	});
+	
+	// Préparer deux vues : par volume ET par taux de conversion
+	
+	// Top canaux par VOLUME de conversions (excluant "Non renseigné" si peu significatif)
+	const topChannelsByVolume = Object.entries(channelStats)
+		.filter(([channel, stats]) => {
+			// Exclure "Non renseigné" s'il représente plus de 80% des données
+			if (channel === 'Non renseigné' && missingChannelCount > data.length * 0.8) {
+				return false;
+			}
+			return stats.conversions > 0;
+		})
+		.map(([channel, stats]) => [channel, stats.conversions])
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, 5);
 	
-	console.log('Canaux trouvés :', Object.keys(channelTotal));
+	// Top canaux par TAUX de conversion (minimum 5 prospects pour être significatif)
+	const topChannelsByRate = Object.entries(channelStats)
+		.filter(([channel, stats]) => stats.total >= 5 && stats.conversions > 0)
+		.sort((a, b) => b[1].rate - a[1].rate)
+		.slice(0, 5);
+	
+	console.log('\n📊 Analyse détaillée des canaux :');
+	Object.entries(channelStats).forEach(([channel, stats]) => {
+		console.log(`- ${channel}: ${stats.conversions} conversions sur ${stats.total} (${stats.rate}%)`);
+	});
+	console.log(`\n⚠️  Prospects sans canal renseigné : ${missingChannelCount} (${Math.round((missingChannelCount / data.length) * 100)}%)`);
+	
+	// Utiliser topChannelsByVolume par défaut, ou topChannelsByRate si plus pertinent
+	const topChannels = topChannelsByVolume.length >= 3 ? topChannelsByVolume : topChannelsByRate.map(([channel, stats]) => [channel, stats.conversions]);
+	
 	console.log('Top canaux avec conversions :', topChannels);
 	
 	// Évolution mensuelle
@@ -284,6 +325,9 @@ function calculateKPIs(data) {
 		avgPrice,
 		venueStats,
 		topChannels,
+		channelStats,
+		topChannelsByRate,
+		missingChannelRate: Math.round((missingChannelCount / data.length) * 100),
 		monthlyData,
 		refusalReasons,
 		tooExpensiveRate,
@@ -455,6 +499,42 @@ function generateHTML(kpis) {
 			padding: 40px;
 			font-style: italic;
 		}
+		
+		.warning-box {
+			background: #fef3c7;
+			border: 1px solid #f59e0b;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+		}
+		
+		.warning-box p {
+			color: #92400e;
+			margin: 0;
+		}
+		
+		.simple-stats {
+			padding: 20px;
+		}
+		
+		.stat-item {
+			margin-bottom: 15px;
+			padding: 15px;
+			background: #f3f4f6;
+			border-radius: 8px;
+		}
+		
+		.stat-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		
+		.stat-detail {
+			margin-top: 8px;
+			font-size: 14px;
+			color: #666;
+		}
 	</style>
 </head>
 <body>
@@ -523,8 +603,33 @@ function generateHTML(kpis) {
 			</div>
 			
 			<div class="chart-container">
-				<h3 class="chart-title">🎯 Top Canaux d'Acquisition</h3>
-				${kpis.topChannels.length > 0 ? '<canvas id="channelChart"></canvas>' : '<div class="no-data">Aucune conversion enregistrée par canal</div>'}
+				<h3 class="chart-title">🎯 Canaux d'Acquisition</h3>
+				${kpis.missingChannelRate > 70 ? 
+					`<div class="warning-box">
+						<p>⚠️ ${kpis.missingChannelRate}% des prospects n'ont pas de canal renseigné</p>
+					</div>` : ''
+				}
+				${kpis.topChannels.length > 2 ? 
+					'<canvas id="channelChart"></canvas>' : 
+					kpis.topChannels.length > 0 ?
+						`<div class="simple-stats">
+							${Object.entries(kpis.channelStats)
+								.filter(([channel, stats]) => stats.conversions > 0)
+								.sort((a, b) => b[1].conversions - a[1].conversions)
+								.map(([channel, stats]) => `
+									<div class="stat-item">
+										<div class="stat-header">
+											<strong>${channel}</strong>
+											<span style="color: #10b981;">${stats.conversions} conversion${stats.conversions > 1 ? 's' : ''}</span>
+										</div>
+										<div class="stat-detail">
+											Taux: ${stats.rate}% (${stats.conversions}/${stats.total})
+										</div>
+									</div>
+								`).join('')}
+						</div>` :
+						'<div class="no-data">Aucune conversion enregistrée par canal. Vérifiez que le champ "Canal d\'acquisition" est bien renseigné dans vos prospects.</div>'
+				}
 			</div>
 		</div>
 		
@@ -657,15 +762,22 @@ function generateHTML(kpis) {
 			}
 		});
 		
-		// Graphique des canaux (seulement si des données existent)
-		if (kpis.topChannels.length > 0) {
-			new Chart(document.getElementById('channelChart'), {
+		// Graphique des canaux (version améliorée)
+		if (kpis.topChannels.length > 2) {
+			const ctx = document.getElementById('channelChart');
+			const channelData = kpis.topChannels.map(c => c[1]);
+			const channelLabels = kpis.topChannels.map(c => {
+				const stats = kpis.channelStats[c[0]];
+				return stats ? c[0] + ' (' + stats.rate + '%)' : c[0];
+			});
+			
+			new Chart(ctx, {
 				type: 'horizontalBar',
 				data: {
-					labels: kpis.topChannels.map(c => c[0]),
+					labels: channelLabels,
 					datasets: [{
 						label: 'Conversions',
-						data: kpis.topChannels.map(c => c[1]),
+						data: channelData,
 						backgroundColor: ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444']
 					}]
 				},
@@ -678,6 +790,20 @@ function generateHTML(kpis) {
 							beginAtZero: true,
 							ticks: {
 								precision: 0
+							}
+						}
+					},
+					plugins: {
+						tooltip: {
+							callbacks: {
+								afterLabel: function(context) {
+									const channel = kpis.topChannels[context.dataIndex][0];
+									const stats = kpis.channelStats[channel];
+									if (stats) {
+										return 'Taux de conversion: ' + stats.rate + '%\\nTotal prospects: ' + stats.total;
+									}
+									return '';
+								}
 							}
 						}
 					}
