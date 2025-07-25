@@ -80,6 +80,8 @@ function calculateKPIs(data) {
 			channelStats: {},
 			topChannelsByRate: [],
 			missingChannelRate: 0,
+			pipelineData: {},
+			pipelineStages: [],
 			lastUpdate: new Date().toLocaleString('fr-FR')
 		};
 	}
@@ -305,6 +307,73 @@ function calculateKPIs(data) {
 	const totalRefusals = Object.values(refusalReasons).reduce((a, b) => a + b, 0);
 	const tooExpensiveRate = totalRefusals > 0 ? Math.round((tooExpensiveCount / totalRefusals) * 100) : 0;
 	
+	// Pipeline de vente - Analyse du funnel avec tous les statuts
+	const pipelineStages = [
+		'Prospect',
+		'Prospect qualifié',
+		'En attente de visite',
+		'À visité',
+		'Contrat signé',
+		'Réponse négative',
+		'Pas de réponse'
+	];
+	
+	// Compter les prospects à chaque étape
+	const pipelineData = {};
+	
+	// Initialiser les compteurs
+	pipelineStages.forEach(stage => {
+		pipelineData[stage] = {
+			count: 0,
+			value: 0,
+			percentage: 0
+		};
+	});
+	
+	// Compter et calculer les valeurs
+	data.forEach(item => {
+		const statusProp = item.properties['Statut'];
+		const status = statusProp?.select?.name || statusProp?.status?.name;
+		
+		if (pipelineData[status] !== undefined) {
+			pipelineData[status].count++;
+			
+			// Calculer la valeur (prix) pour chaque statut
+			let price = item.properties['Tarif HT']?.number || 
+						item.properties['CA HT']?.number || 0;
+			
+			if (!price && item.properties['Tarif final']?.rich_text?.[0]?.plain_text) {
+				const match = item.properties['Tarif final'].rich_text[0].plain_text.match(/(\d+)/);
+				if (match) price = parseInt(match[1]);
+			}
+			
+			pipelineData[status].value += price;
+		}
+	});
+	
+	// Calculer les pourcentages par rapport au total
+	pipelineStages.forEach(stage => {
+		pipelineData[stage].percentage = total > 0 ? Math.round((pipelineData[stage].count / total) * 100) : 0;
+	});
+	
+	// Calculer les statistiques de conversion
+	const totalActive = pipelineData['Prospect'].count + 
+					   pipelineData['Prospect qualifié'].count + 
+					   pipelineData['En attente de visite'].count + 
+					   pipelineData['À visité'].count;
+	
+	const conversionStats = {
+		successRate: total > 0 ? Math.round((pipelineData['Contrat signé'].count / total) * 100) : 0,
+		failureRate: total > 0 ? Math.round((pipelineData['Réponse négative'].count / total) * 100) : 0,
+		noResponseRate: total > 0 ? Math.round((pipelineData['Pas de réponse'].count / total) * 100) : 0,
+		activeRate: total > 0 ? Math.round((totalActive / total) * 100) : 0
+	};
+	
+	console.log('\n📈 Analyse du pipeline complet :');
+	pipelineStages.forEach(stage => {
+		console.log(`- ${stage}: ${pipelineData[stage].count} (${pipelineData[stage].percentage}%)`);
+	});
+	
 	console.log('\n✅ KPIs calculés :');
 	console.log(`- Taux de réussite : ${successRate}% (${success}/${total})`);
 	console.log(`- Taux d'échec : ${failureRate}%`);
@@ -328,8 +397,38 @@ function calculateKPIs(data) {
 		monthlyData,
 		refusalReasons,
 		tooExpensiveRate,
+		pipelineData,
+		pipelineStages,
+		conversionStats,
 		lastUpdate: new Date().toLocaleString('fr-FR')
 	};
+	
+	// Créer un résumé des statistiques
+	const statsHTML = `
+		<h4 style="text-align: center; color: #1f2937; margin-bottom: 20px; font-weight: 600;">Résumé du Pipeline</h4>
+		<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+			<div style="text-align: center;">
+				<div style="font-size: 32px; font-weight: bold; color: #3b82f6;">${kpis.conversionStats ? kpis.conversionStats.activeRate : 0}%</div>
+				<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Prospects actifs</div>
+				<div style="font-size: 12px; color: #9ca3af; margin-top: 2px;">(En cours de traitement)</div>
+			</div>
+			<div style="text-align: center;">
+				<div style="font-size: 32px; font-weight: bold; color: #10b981;">${kpis.conversionStats ? kpis.conversionStats.successRate : 0}%</div>
+				<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Taux de conversion</div>
+				<div style="font-size: 12px; color: #9ca3af; margin-top: 2px;">(${kpis.pipelineData ? kpis.pipelineData['Contrat signé'].count : 0} contrats signés)</div>
+			</div>
+			<div style="text-align: center;">
+				<div style="font-size: 32px; font-weight: bold; color: #ef4444;">${kpis.conversionStats ? kpis.conversionStats.failureRate : 0}%</div>
+				<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Taux d'échec</div>
+				<div style="font-size: 12px; color: #9ca3af; margin-top: 2px;">(${kpis.pipelineData ? kpis.pipelineData['Réponse négative'].count : 0} refus)</div>
+			</div>
+			<div style="text-align: center;">
+				<div style="font-size: 32px; font-weight: bold; color: #f59e0b;">${kpis.conversionStats ? kpis.conversionStats.noResponseRate : 0}%</div>
+				<div style="font-size: 14px; color: #6b7280; margin-top: 4px;">Sans réponse</div>
+				<div style="font-size: 12px; color: #9ca3af; margin-top: 2px;">(${kpis.pipelineData ? kpis.pipelineData['Pas de réponse'].count : 0} abandons)</div>
+			</div>
+		</div>
+	`;
 }
 
 // Générer le HTML avec les données
@@ -538,6 +637,10 @@ function generateHTML(kpis) {
 			text-decoration: line-through;
 			opacity: 0.5;
 		}
+		
+		.pipeline-container {
+			grid-column: span 2;
+		}
 	</style>
 </head>
 <body>
@@ -616,6 +719,12 @@ function generateHTML(kpis) {
 					'<canvas id="channelChart"></canvas>' : 
 					'<div class="no-data">Aucun canal d\'acquisition renseigné. Assurez-vous de bien remplir ce champ dans vos prospects.</div>'
 				}
+			</div>
+			
+			<!-- Pipeline de vente -->
+			<div class="chart-container pipeline-container">
+				<h3 class="chart-title">🎯 Pipeline de Vente</h3>
+				<canvas id="pipelineChart" style="max-height: 400px;"></canvas>
 			</div>
 		</div>
 		
@@ -871,6 +980,101 @@ function generateHTML(kpis) {
 					}
 				}
 			});
+		}
+		
+		// Graphique du pipeline de vente - BARRES VERTICALES
+		if (kpis.pipelineData && kpis.pipelineStages) {
+			const pipelineCtx = document.getElementById('pipelineChart');
+			
+			// Préparer les données pour les barres
+			const barData = kpis.pipelineStages.map(stage => {
+				const data = kpis.pipelineData[stage];
+				return data ? data.count : 0;
+			});
+			
+			// Labels simplifiés
+			const barLabels = kpis.pipelineStages;
+			
+			// Couleurs différentes pour chaque type de statut
+			const barColors = [
+				'#3b82f6', // Bleu pour Prospect
+				'#6366f1', // Indigo pour Qualifié
+				'#8b5cf6', // Violet pour En attente
+				'#a78bfa', // Violet clair pour Visité
+				'#10b981', // Vert pour Signé (succès)
+				'#ef4444', // Rouge pour Réponse négative (échec)
+				'#f59e0b'  // Orange pour Pas de réponse
+			];
+			
+			// Créer le graphique en barres verticales
+			new Chart(pipelineCtx, {
+				type: 'bar',
+				data: {
+					labels: barLabels,
+					datasets: [{
+						label: 'Nombre de prospects',
+						data: barData,
+						backgroundColor: barColors,
+						borderWidth: 0
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					plugins: {
+						legend: {
+							display: false
+						},
+						tooltip: {
+							callbacks: {
+								label: function(context) {
+									const stage = kpis.pipelineStages[context.dataIndex];
+									const data = kpis.pipelineData[stage];
+									const value = data ? data.value : 0;
+									
+									return [
+										'Nombre: ' + context.parsed.y + ' prospects',
+										'Pourcentage du total: ' + (data ? data.percentage : 0) + '%',
+										'Valeur totale: ' + value.toLocaleString('fr-FR') + '€',
+										'Valeur moyenne: ' + (data && data.count > 0 ? Math.round(value / data.count) : 0).toLocaleString('fr-FR') + '€'
+									];
+								}
+							}
+						}
+					},
+					scales: {
+						y: {
+							beginAtZero: true,
+							ticks: {
+								precision: 0
+							},
+							title: {
+								display: true,
+								text: 'Nombre de prospects'
+							}
+						},
+						x: {
+							ticks: {
+								autoSkip: false,
+								maxRotation: 45,
+								minRotation: 45,
+								font: {
+									size: 11
+								}
+							}
+						}
+					}
+				}
+			});
+			
+			// Ajouter des statistiques de synthèse sous le graphique
+			const statsContainer = document.createElement('div');
+			statsContainer.style.marginTop = '30px';
+			statsContainer.style.padding = '20px';
+			statsContainer.style.backgroundColor = '#f9fafb';
+			statsContainer.style.borderRadius = '8px';
+			statsContainer.innerHTML = statsHTML;
+			pipelineCtx.parentElement.appendChild(statsContainer);
 		}
 	</script>
 </body>

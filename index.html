@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Dashboard Commercial - 25/07/2025 12:48:20</title>
+	<title>Dashboard Commercial - 25/07/2025 17:57:54</title>
 	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<style>
 		* {
@@ -200,13 +200,17 @@
 			text-decoration: line-through;
 			opacity: 0.5;
 		}
+		
+		.pipeline-container {
+			grid-column: span 2;
+		}
 	</style>
 </head>
 <body>
 	<div class="dashboard">
 		<div class="header">
 			<h1>📊 Dashboard Commercial</h1>
-			<div class="last-update">Dernière mise à jour: 25/07/2025 12:48:20</div>
+			<div class="last-update">Dernière mise à jour: 25/07/2025 17:57:54</div>
 		</div>
 		
 		<!-- KPIs Principaux -->
@@ -233,7 +237,7 @@
 			
 			<div class="kpi-card">
 				<div class="kpi-label">Total Prospects</div>
-				<div class="kpi-value">267</div>
+				<div class="kpi-value">269</div>
 				<div class="kpi-sublabel">Dans la base</div>
 			</div>
 			
@@ -273,6 +277,12 @@
 						<p>⚠️ 91% des prospects n'ont pas de canal renseigné</p>
 					</div>
 				<canvas id="channelChart"></canvas>
+			</div>
+			
+			<!-- Pipeline de vente -->
+			<div class="chart-container pipeline-container">
+				<h3 class="chart-title">🎯 Pipeline de Vente</h3>
+				<canvas id="pipelineChart" style="max-height: 400px;"></canvas>
 			</div>
 		</div>
 		
@@ -337,7 +347,7 @@
 		Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 		
 		// Données pour les graphiques
-		const kpis = {"total":267,"successRate":34,"failureRate":37,"noResponseRate":11,"avgCalls":"3.7","avgPrice":796,"venueStats":{"Rooftop":{"total":199,"success":89},"Tama":{"total":70,"success":2}},"topChannels":[["ABC Salles",{"conversions":0,"total":9,"rate":0}],["1001 Salles",{"conversions":0,"total":6,"rate":0}],["Le bon coin",{"conversions":0,"total":3,"rate":0}],["Site Web",{"conversions":1,"total":3,"rate":33}],["Google",{"conversions":1,"total":2,"rate":50}]],"channelStats":{"ABC Salles":{"conversions":0,"total":9,"rate":0},"1001 Salles":{"conversions":0,"total":6,"rate":0},"Non renseigné":{"conversions":89,"total":244,"rate":36},"Google":{"conversions":1,"total":2,"rate":50},"Le bon coin":{"conversions":0,"total":3,"rate":0},"Site Web":{"conversions":1,"total":3,"rate":33}},"topChannelsByRate":[["Non renseigné",{"conversions":89,"total":244,"rate":36}]],"missingChannelRate":91,"monthlyData":{"fév":0,"mar":8,"avr":43,"mai":53,"juin":37,"juil":24},"refusalReasons":{"Autre lieu":7,"Non spécifié":80,"Trop Loin":2,"Trop Cher":5,"Annulé":3,"Erreur":1},"tooExpensiveRate":5,"lastUpdate":"25/07/2025 12:48:20"};
+		const kpis = {"total":269,"successRate":34,"failureRate":36,"noResponseRate":11,"avgCalls":"3.7","avgPrice":796,"venueStats":{"Rooftop":{"total":201,"success":89},"Tama":{"total":70,"success":2}},"topChannels":[["ABC Salles",{"conversions":0,"total":10,"rate":0}],["1001 Salles",{"conversions":0,"total":6,"rate":0}],["Site Web",{"conversions":1,"total":4,"rate":25}],["Le bon coin",{"conversions":0,"total":3,"rate":0}],["Google",{"conversions":1,"total":2,"rate":50}]],"channelStats":{"Site Web":{"conversions":1,"total":4,"rate":25},"ABC Salles":{"conversions":0,"total":10,"rate":0},"1001 Salles":{"conversions":0,"total":6,"rate":0},"Non renseigné":{"conversions":89,"total":244,"rate":36},"Google":{"conversions":1,"total":2,"rate":50},"Le bon coin":{"conversions":0,"total":3,"rate":0}},"topChannelsByRate":[["Non renseigné",{"conversions":89,"total":244,"rate":36}]],"missingChannelRate":91,"monthlyData":{"fév":0,"mar":8,"avr":43,"mai":53,"juin":37,"juil":26},"refusalReasons":{"Autre lieu":7,"Non spécifié":80,"Trop Loin":2,"Trop Cher":5,"Annulé":3,"Erreur":1},"tooExpensiveRate":5,"pipelineData":{"Prospect":{"count":26,"value":1550,"percentage":10},"Prospect qualifié":{"count":14,"value":30200,"percentage":5},"En attente de visite":{"count":1,"value":3750,"percentage":0},"À visité":{"count":10,"value":15240,"percentage":4},"Contrat signé":{"count":91,"value":41410,"percentage":34},"Réponse négative":{"count":98,"value":87920,"percentage":36},"Pas de réponse":{"count":29,"value":15350,"percentage":11}},"pipelineStages":["Prospect","Prospect qualifié","En attente de visite","À visité","Contrat signé","Réponse négative","Pas de réponse"],"conversionStats":{"successRate":34,"failureRate":36,"noResponseRate":11,"activeRate":19},"lastUpdate":"25/07/2025 17:57:54"};
 		
 		// Graphique des statuts
 		new Chart(document.getElementById('statusChart'), {
@@ -556,6 +566,101 @@
 					}
 				}
 			});
+		}
+		
+		// Graphique du pipeline de vente - BARRES VERTICALES
+		if (kpis.pipelineData && kpis.pipelineStages) {
+			const pipelineCtx = document.getElementById('pipelineChart');
+			
+			// Préparer les données pour les barres
+			const barData = kpis.pipelineStages.map(stage => {
+				const data = kpis.pipelineData[stage];
+				return data ? data.count : 0;
+			});
+			
+			// Labels simplifiés
+			const barLabels = kpis.pipelineStages;
+			
+			// Couleurs différentes pour chaque type de statut
+			const barColors = [
+				'#3b82f6', // Bleu pour Prospect
+				'#6366f1', // Indigo pour Qualifié
+				'#8b5cf6', // Violet pour En attente
+				'#a78bfa', // Violet clair pour Visité
+				'#10b981', // Vert pour Signé (succès)
+				'#ef4444', // Rouge pour Réponse négative (échec)
+				'#f59e0b'  // Orange pour Pas de réponse
+			];
+			
+			// Créer le graphique en barres verticales
+			new Chart(pipelineCtx, {
+				type: 'bar',
+				data: {
+					labels: barLabels,
+					datasets: [{
+						label: 'Nombre de prospects',
+						data: barData,
+						backgroundColor: barColors,
+						borderWidth: 0
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					plugins: {
+						legend: {
+							display: false
+						},
+						tooltip: {
+							callbacks: {
+								label: function(context) {
+									const stage = kpis.pipelineStages[context.dataIndex];
+									const data = kpis.pipelineData[stage];
+									const value = data ? data.value : 0;
+									
+									return [
+										'Nombre: ' + context.parsed.y + ' prospects',
+										'Pourcentage du total: ' + (data ? data.percentage : 0) + '%',
+										'Valeur totale: ' + value.toLocaleString('fr-FR') + '€',
+										'Valeur moyenne: ' + (data && data.count > 0 ? Math.round(value / data.count) : 0).toLocaleString('fr-FR') + '€'
+									];
+								}
+							}
+						}
+					},
+					scales: {
+						y: {
+							beginAtZero: true,
+							ticks: {
+								precision: 0
+							},
+							title: {
+								display: true,
+								text: 'Nombre de prospects'
+							}
+						},
+						x: {
+							ticks: {
+								autoSkip: false,
+								maxRotation: 45,
+								minRotation: 45,
+								font: {
+									size: 11
+								}
+							}
+						}
+					}
+				}
+			});
+			
+			// Ajouter des statistiques de synthèse sous le graphique
+			const statsContainer = document.createElement('div');
+			statsContainer.style.marginTop = '30px';
+			statsContainer.style.padding = '20px';
+			statsContainer.style.backgroundColor = '#f9fafb';
+			statsContainer.style.borderRadius = '8px';
+			statsContainer.innerHTML = statsHTML;
+			pipelineCtx.parentElement.appendChild(statsContainer);
 		}
 	</script>
 </body>
